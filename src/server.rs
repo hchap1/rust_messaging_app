@@ -3,7 +3,6 @@ use std::io::{Read, Write};
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
-type AM<T> = Arc<Mutex<T>>;
 type AMV<T> = Arc<Mutex<Vec<T>>>;
 
 fn sync_vec<T>(item: Vec<T>) -> AMV<T> {
@@ -58,7 +57,7 @@ impl From<String> for Message {
 }
 
 impl Server {
-    pub fn new(address: &str) -> Self {
+    pub fn new(address: String) -> Self {
         let mut server = Self {
             incoming_messages: sync_vec(vec![]),
             outgoing_messages: sync_vec(vec![]),
@@ -66,14 +65,31 @@ impl Server {
             listen_thread: None
         };
 
-        server.listen_thread = Some(
-            spawn(move || listen(Arc::clone(server.&incoming_messages), Arc::clone(server.&message_agents), address))
-        );
+        let client_access_incoming_messages = Arc::clone(&server.incoming_messages);
+        let client_access_message_agents = Arc::clone(&server.message_agents);
+
+        server.listen_thread = Some(spawn(move || {
+            listen(client_access_incoming_messages, client_access_message_agents, address)
+        }));
+
+        server
+    }
+
+    pub fn get_messages(&self) -> Vec<String> {
+        let messages = self.incoming_messages.lock().unwrap(); 
+        messages.iter().map(|x| format!("{}: {}", x.author, x.content)).collect::<Vec<String>>()
     }
 }
 
-fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, address: &str) -> std::io::Result<()> {
-    let tcp_listener = TcpListener::bind(address)?;
+fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, address: String) {
+    let tcp_listener = match TcpListener::bind(&address) {
+        Ok(tcp_listener) => tcp_listener,
+        Err(e) => {
+            eprintln!("Failed to bind to IP: {e:?}");
+            return;
+        }
+    };
+
     let server_address = tcp_listener.local_addr().unwrap().to_string();
 
     let mut thread_dump: Vec<JoinHandle<()>> = vec![];
@@ -95,8 +111,6 @@ fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, addre
             Err(e) => eprintln!("Connection failed: {}", e),
         }
     }
-
-    Ok(())
 }
 
 fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: AMV<Message>) {
