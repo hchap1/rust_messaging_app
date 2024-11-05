@@ -1,4 +1,5 @@
 mod server;
+mod client;
 
 use server::Server;
 use std::time::Duration;

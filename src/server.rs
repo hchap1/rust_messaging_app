@@ -27,7 +27,7 @@ fn broadcast_server_address(server_address: String, frequency: f64) -> Result<St
     }
 }
 
-struct Message {
+pub struct Message {
     author: String,
     content: String
 }
