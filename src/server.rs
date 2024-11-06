@@ -5,22 +5,27 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 type AMV<T> = Arc<Mutex<Vec<T>>>;
 
-fn sync_vec<T>(item: Vec<T>) -> AMV<T> {
+pub fn sync_vec<T>(item: Vec<T>) -> AMV<T> {
     Arc::new(Mutex::new(item))
 }
 
 fn broadcast_server_address(server_address: String, frequency: f64) -> Result<String, String> {
-    let udp_socket = match UdpSocket::bind("0.0.0.0:34254") {
+    println!("Attempting to create UDP Socket");
+    let udp_socket = match UdpSocket::bind("0.0.0.0:12345") {
         Ok(udp_socket) => udp_socket,
-        Err(e) => return Err(format!("Failed to broadcast server address: {e:?}"))
+        Err(e) => {
+            println!("UDB Creation failure: {e:?}");
+            return Err(format!("Failed to broadcast server address: {e:?}"))
+        }
     };
+    println!("Successfully created UDP Socket");
 
     let _ = udp_socket.set_broadcast(true);
     let sleep_duration: Duration = Duration::from_millis(((1f64 / frequency) * 1000f64) as u64);
 
     loop {
-        match udp_socket.send_to(server_address.as_bytes(), "255.255.255.255:34254") {
-            Ok(_) => {}
+        match udp_socket.send_to(server_address.as_bytes(), "255.255.255.255:12345") {
+            Ok(_) => println!("BROADCASTED : {server_address}"),
             Err(_) => return Err(format!("Failed to send address over UDP socket."))
         }
         sleep(sleep_duration);
@@ -37,6 +42,12 @@ pub struct Server {
     outgoing_messages: AMV<Message>,
     message_agents: AMV<TcpStream>,
     listen_thread: Option<JoinHandle<()>>
+}
+
+impl Message {
+    pub fn serialise(&self) -> String {
+        format!("{}|{}", self.author, self.content)
+    }
 }
 
 impl From<String> for Message {
@@ -69,7 +80,7 @@ impl Server {
         let client_access_message_agents = Arc::clone(&server.message_agents);
 
         server.listen_thread = Some(spawn(move || {
-            listen(client_access_incoming_messages, client_access_message_agents, address)
+            listen(client_access_incoming_messages, client_access_message_agents, address);
         }));
 
         server
@@ -108,16 +119,24 @@ fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, addre
                 let client_specific_message_dump: AMV<Message> = Arc::clone(&incoming_messages);
                 thread_dump.push(spawn(move || read_incoming_messages_from_client(stream, client_specific_message_dump)));
             }
-            Err(e) => eprintln!("Connection failed: {}", e),
+            Err(_) => return
         }
     }
 }
 
-fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: AMV<Message>) {
+pub fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: AMV<Message>) {
     loop {
         let mut buffer = [0; 512];
         let _ = stream.read(&mut buffer);
         let message: String = String::from_utf8_lossy(&buffer).to_string();
+        if message.is_empty() {
+            eprintln!("Client disconnected unexpectedly.");
+            return;
+        }
+        if message.chars().nth(0).unwrap() == '\0' {
+            eprintln!("Client disconnected unexpectedly.");
+            return;
+        }
         println!("Received: {}", message);
         {
             let mut message_dump = message_dump.lock().unwrap();
