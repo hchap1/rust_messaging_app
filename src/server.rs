@@ -63,7 +63,8 @@ pub struct Server {
     incoming_messages: AMV<Message>,
     outgoing_messages: AMV<Message>,
     message_agents: AMV<TcpStream>,
-    listen_thread: Option<JoinHandle<()>>
+    listen_thread: Option<JoinHandle<()>>,
+    ip_address: String
 }
 
 impl Message {
@@ -91,19 +92,23 @@ impl From<String> for Message {
 
 impl Server {
     pub fn new(port: usize) -> Self {
-        let mut server = Self {
-            incoming_messages: sync_vec(vec![]),
-            outgoing_messages: sync_vec(vec![]),
-            message_agents: sync_vec(vec![]),
-            listen_thread: None
-        };
-
         let ip_address = match get_localaddr() {
             Some(addr) => addr,
             None => {
                 panic!("Cannot start server, as no localaddr was found.");
             }
+        } + &format!(":{port}");
+
+        let mut server = Self {
+            incoming_messages: sync_vec(vec![]),
+            outgoing_messages: sync_vec(vec![]),
+            message_agents: sync_vec(vec![]),
+            listen_thread: None,
+            ip_address: ip_address.clone()
         };
+
+
+        println!("Server created with IP: {ip_address}");
 
         let client_access_incoming_messages = Arc::clone(&server.incoming_messages);
         let client_access_message_agents = Arc::clone(&server.message_agents);
@@ -118,6 +123,10 @@ impl Server {
     pub fn get_messages(&self) -> Vec<String> {
         let messages = self.incoming_messages.lock().unwrap(); 
         messages.iter().map(|x| format!("{}: {}", x.author, x.content)).collect::<Vec<String>>()
+    }
+
+    pub fn clone_addr(&self) -> String {
+        self.ip_address.clone()
     }
 }
 
