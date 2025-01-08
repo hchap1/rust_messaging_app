@@ -1,7 +1,7 @@
 import socket
 
 # Define the port number and address for receiving broadcasts
-PORT = 34254
+PORT = 12345
 BROADCAST_IP = "0.0.0.0"  # Use "0.0.0.0" to listen on all available interfaces
 
 # Create a UDP socket

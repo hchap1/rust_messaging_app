@@ -34,7 +34,7 @@ pub struct Client {
 impl Client {
     pub fn new() -> Result<(Self, Option<Server>), String> {
         // Find a UDP broadcast, on failure create server    
-        let udp_socket = match UdpSocket::bind("0.0.0.0:34254") {
+        let udp_socket = match UdpSocket::bind("0.0.0.0:12345") {
             Ok(udp_socket) => udp_socket,
             Err(e) => return Err(format!("Failed to bind UdpSocket: {e:?}"))
         };
