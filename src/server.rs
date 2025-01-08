@@ -10,6 +10,26 @@ pub fn sync_vec<T>(item: Vec<T>) -> AMV<T> {
     Arc::new(Mutex::new(item))
 }
 
+pub fn get_localaddr() -> Option<String> {
+    let mut interfaces: Vec<String> = vec![];
+    let network_interfaces = NetworkInterface::show().unwrap();
+    for itf in network_interfaces.into_iter() {
+        let addr = itf.addr;
+        let data = match addr.first() {
+            Some(data) => data.ip(),
+            None => continue
+        };
+
+        if data.to_string() == "127.0.0.1" {
+            continue;
+        }
+
+        interfaces.push(data.to_string());
+    }
+
+    interfaces.first().cloned()
+}
+
 fn broadcast_server_address(server_address: String, frequency: f64) -> Result<String, String> {
     println!("Attempting to create UDP Socket");
     let udp_socket = match UdpSocket::bind("0.0.0.0:12345") {
@@ -19,12 +39,8 @@ fn broadcast_server_address(server_address: String, frequency: f64) -> Result<St
             return Err(format!("Failed to broadcast server address: {e:?}"))
         }
     };
-    println!("Successfully created UDP Socket");
 
-    let network_interfaces = NetworkInterface::show().unwrap();
-    for itf in network_interfaces.into_iter() {
-        println!("{itf:?}");
-    }
+    println!("Successfully created UDP Socket");
 
     let _ = udp_socket.set_broadcast(true);
     let sleep_duration: Duration = Duration::from_millis(((1f64 / frequency) * 1000f64) as u64);
@@ -74,7 +90,7 @@ impl From<String> for Message {
 }
 
 impl Server {
-    pub fn new(address: String) -> Self {
+    pub fn new(port: usize) -> Self {
         let mut server = Self {
             incoming_messages: sync_vec(vec![]),
             outgoing_messages: sync_vec(vec![]),
@@ -82,11 +98,18 @@ impl Server {
             listen_thread: None
         };
 
+        let ip_address = match get_localaddr() {
+            Some(addr) => addr,
+            None => {
+                panic!("Cannot start server, as no localaddr was found.");
+            }
+        };
+
         let client_access_incoming_messages = Arc::clone(&server.incoming_messages);
         let client_access_message_agents = Arc::clone(&server.message_agents);
 
         server.listen_thread = Some(spawn(move || {
-            listen(client_access_incoming_messages, client_access_message_agents, address);
+            listen(client_access_incoming_messages, client_access_message_agents, ip_address);
         }));
 
         server

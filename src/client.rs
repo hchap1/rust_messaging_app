@@ -50,7 +50,7 @@ impl Client {
             Ok((size, _)) => String::from_utf8_lossy(&buffer[..size]).to_string(),
             Err(_) => {
                 std::mem::drop(udp_socket);
-                server = Some(Server::new(String::from("0.0.0.0:7878")));
+                server = Some(Server::new(7878));
                 sleep(Duration::from_millis(100));
                 format!("127.0.0.1:7878")
             }
