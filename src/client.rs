@@ -38,6 +38,10 @@ impl Client {
             Ok(udp_socket) => udp_socket,
             Err(e) => return Err(format!("Failed to bind UdpSocket: {e:?}"))
         };
+
+
+        println!("Succesfully created UDP socket.");
+
         let _ = udp_socket.set_read_timeout(Some(Duration::new(5, 0)));
         let mut buffer = [0; 512];
         let mut server: Option<Server> = None;
@@ -51,6 +55,8 @@ impl Client {
                 format!("127.0.0.1:7878")
             }
         };
+
+        println!("Either received or timed out. {server_address}");
 
         let write_stream = match TcpStream::connect(server_address) {
             Ok(write_stream) => write_stream,
