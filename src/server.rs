@@ -1,5 +1,6 @@
 use std::net::{UdpSocket, TcpListener, TcpStream};
 use std::io::{Read, Write};
+use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
@@ -14,11 +15,16 @@ fn broadcast_server_address(server_address: String, frequency: f64) -> Result<St
     let udp_socket = match UdpSocket::bind("0.0.0.0:12345") {
         Ok(udp_socket) => udp_socket,
         Err(e) => {
-            println!("UDB Creation failure: {e:?}");
+            println!("UDP Creation failure: {e:?}");
             return Err(format!("Failed to broadcast server address: {e:?}"))
         }
     };
     println!("Successfully created UDP Socket");
+
+    let network_interfaces = NetworkInterface::show().unwrap();
+    for itf in network_interfaces.into_iter() {
+        println!("{itf:?}");
+    }
 
     let _ = udp_socket.set_broadcast(true);
     let sleep_duration: Duration = Duration::from_millis(((1f64 / frequency) * 1000f64) as u64);
