@@ -54,7 +54,8 @@ impl Client {
                 let s = Server::new(7878);
                 sleep(Duration::from_millis(100));
                 let ip_address = s.clone_addr();
-                server = Some(s)
+                server = Some(s);
+                ip_address
             }
         };
 
