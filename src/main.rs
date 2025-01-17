@@ -1,7 +1,7 @@
 mod server;
 mod client;
 
-use server::Message;
+use server::{Message, get_localaddr};
 use std::time::Duration;
 use std::thread::sleep;
 use client::Client;
@@ -12,15 +12,19 @@ fn main() {
         Err(e) => panic!("Error: {e:?}")
     };
 
-    if let Some(server) = server {
-        println!("Server was started.");
-        loop {
-            sleep(Duration::from_secs(1));
-            println!("Current server message list: {:?}", server.get_messages());
+    let hostname: String = match get_localaddr() {
+        Some(hostname) => hostname,
+        None => {
+            eprintln!("No localaddr could be determined.");
+            return;
         }
+    };
+
+    if let Some(_) = server {
+        println!("Server was started.");
     }
 
-    let test_message: Message = String::from("TestAuthor|this is a test message").into();
+    let test_message: Message = format!("{hostname}|Test").into();
 
     loop {
         let _ = client.send(&test_message);
