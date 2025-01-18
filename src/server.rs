@@ -4,6 +4,7 @@ use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
+use std::mem::replace;
 type AMV<T> = Arc<Mutex<Vec<T>>>;
 
 pub fn sync_vec<T>(item: Vec<T>) -> AMV<T> {
@@ -47,16 +48,17 @@ fn broadcast_server_address(server_address: String, frequency: f64) -> Result<St
 
     loop {
         match udp_socket.send_to(server_address.as_bytes(), "255.255.255.255:12345") {
-            Ok(_) => println!("BROADCASTED : {server_address}"),
+            Ok(_) => {},
             Err(_) => return Err(format!("Failed to send address over UDP socket."))
         }
         sleep(sleep_duration);
     }
 }
 
+#[derive(Clone)]
 pub struct Message {
-    author: String,
-    content: String
+    pub author: String,
+    pub content: String
 }
 
 pub struct Server {
@@ -69,15 +71,18 @@ pub struct Server {
 
 impl Message {
     pub fn serialise(&self) -> String {
-        format!("{}|{}", self.author, self.content)
+        format!("{}|{}\n", self.author, self.content)
     }
 }
 
-impl From<String> for Message {
-    fn from(serialised: String) -> Self {
+pub fn deserialise(serialised: String) -> Vec<Message> {
+    // Split messages apart from malformed packets
+    let messages: Vec<String> = serialised.split('\n').map(|x| x.to_string()).collect::<Vec<String>>();
+    let mut message_objects: Vec<Message> = vec![];
+    for message in messages {
         // Assume serialised protocol: NAME|CONTENT
-        let components = serialised.split("|").map(|x| x.to_string()).collect::<Vec<String>>();
-        Self {
+        let components = message.split("|").map(|x| x.to_string()).collect::<Vec<String>>();
+        message_objects.push(Message {
             author: match components.get(0) {
                 Some(author) => author.clone(),
                 None => String::new()
@@ -86,8 +91,9 @@ impl From<String> for Message {
                 Some(content) => content.clone(),
                 None => String::new()
             }
-        }
+        });
     }
+    message_objects
 }
 
 impl Server {
@@ -120,9 +126,24 @@ impl Server {
         server
     }
 
-    pub fn get_messages(&self) -> Vec<String> {
-        let messages = self.incoming_messages.lock().unwrap(); 
-        messages.iter().map(|x| format!("{}: {}", x.author, x.content)).collect::<Vec<String>>()
+    pub fn get_messages(&self) -> Option<Vec<Message>> {
+        let mut messages = self.incoming_messages.lock().unwrap(); 
+        if messages.len() == 0 { return None; }
+        Some(replace(&mut messages, vec![]))
+    }
+
+    pub fn distribute(&mut self) {
+        let mut incoming_messages = self.incoming_messages.lock().unwrap();
+        let mut outgoing_messages = self.outgoing_messages.lock().unwrap();
+        let mut streams = self.message_agents.lock().unwrap();
+        outgoing_messages.append(&mut incoming_messages);
+        let mut packet: String = String::new();
+        for outgoing_message in outgoing_messages.iter() {
+            packet += &outgoing_message.serialise();
+        }
+        for stream in streams.iter_mut() {
+            stream.write_all(packet.as_bytes());
+        }
     }
 
     pub fn clone_addr(&self) -> String {
@@ -171,14 +192,13 @@ pub fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: A
             eprintln!("Client disconnected unexpectedly.");
             return;
         }
+
         if message.chars().nth(0).unwrap() == '\0' {
             eprintln!("Client disconnected unexpectedly.");
             return;
         }
-        println!("Received: {}", message);
-        {
-            let mut message_dump = message_dump.lock().unwrap();
-            message_dump.push(message.into())
-        }
+
+        let mut message_dump = message_dump.lock().unwrap();
+        message_dump.append(&mut deserialise(message));
     }
 }

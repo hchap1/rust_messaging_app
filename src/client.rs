@@ -2,7 +2,7 @@ use std::net::{UdpSocket, TcpStream};
 use std::io::{Read, Write};
 use std::time::Duration;
 use std::thread::{sleep, spawn, JoinHandle};
-use crate::server::{Server, Message, sync_vec};
+use crate::server::{Server, Message, sync_vec, deserialise};
 use std::sync::{Arc, Mutex};
 type AMV<T> = Arc<Mutex<Vec<T>>>;
 
@@ -14,7 +14,7 @@ fn receive(message_dump: AMV<Message>, mut read_stream: TcpStream) {
                 let message = String::from_utf8_lossy(&buffer[..size]).to_string();
                 if !message.is_empty() {
                     let mut message_dump = message_dump.lock().unwrap();
-                    message_dump.push(message.into());
+                    message_dump.append(&mut deserialise(message));
                 }
             }
             Err(_) => {

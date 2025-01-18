@@ -1,10 +1,12 @@
 mod server;
 mod client;
+mod application;
 
-use server::{Message, get_localaddr};
-use std::time::Duration;
-use std::thread::sleep;
+use server::get_localaddr;
+use std::thread::{spawn, sleep};
 use client::Client;
+use application::{Application, execute_application};
+use std::time::Duration;
 
 fn main() {
     let (mut client, server) = match Client::new() {
@@ -14,20 +16,22 @@ fn main() {
 
     let hostname: String = match get_localaddr() {
         Some(hostname) => hostname,
-        None => {
-            eprintln!("No localaddr could be determined.");
-            return;
-        }
+        None => panic!("No localaddr could be found.")
     };
 
-    if let Some(_) = server {
-        println!("Server was started.");
-    }
+    let mut terminal = ratatui::init();
+    let application: Application = Application::new();
+    let application_handle = spawn(move || {
+        let _ = execute_application(application, &mut terminal, &mut client, &hostname);
+    });
 
-    let test_message: Message = format!("{hostname}|Test").into();
-
-    loop {
-        let _ = client.send(&test_message);
-        sleep(Duration::from_secs(1));
+    match server {
+        Some(mut server) => {
+            while !application_handle.is_finished() {
+                server.distribute();
+                sleep(Duration::from_secs(1));
+            }
+        }
+        None => { application_handle.join(); }
     }
 }
