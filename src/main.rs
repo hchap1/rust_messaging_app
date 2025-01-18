@@ -9,7 +9,7 @@ use application::{Application, execute_application};
 use std::time::Duration;
 
 fn main() {
-    let (mut client, server) = match Client::new() {
+    let (client, server) = match Client::new() {
         Ok((client, server)) => (client, server),
         Err(e) => panic!("Error: {e:?}")
     };

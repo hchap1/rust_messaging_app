@@ -177,7 +177,6 @@ fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, addre
                     let mut message_agents = message_agents.lock().unwrap();
                     message_agents.push(outgoing_stream);
                 }
-                println!("Client connected: {}", stream.peer_addr().unwrap());
                 let client_specific_message_dump: AMV<Message> = Arc::clone(&incoming_messages);
                 thread_dump.push(spawn(move || read_incoming_messages_from_client(stream, client_specific_message_dump)));
             }
