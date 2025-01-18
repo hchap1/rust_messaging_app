@@ -1,4 +1,5 @@
 use std::net::{UdpSocket, TcpStream};
+use std::mem::replace;
 use std::io::{Read, Write};
 use std::time::Duration;
 use std::thread::{sleep, spawn, JoinHandle};
@@ -79,5 +80,11 @@ impl Client {
             Ok(_) => Ok(1),
             Err(e) => Err(format!("Error: {e:?}"))
         }
+    }
+
+    pub fn consume_inbox(&mut self) -> Option<Vec<Message>> {
+        let mut inbox = self.incoming_messages.lock().unwrap();
+        if inbox.len() == 0 { return None; }
+        Some(replace(&mut inbox, vec![]))
     }
 }

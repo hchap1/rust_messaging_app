@@ -29,20 +29,26 @@ impl Application {
         }
     }
 
-    pub fn run(&mut self, terminal: &mut DefaultTerminal, client: &mut Client, hostname: &String) {
-        while !self.exit {
-            terminal.draw(|frame| self.draw(frame));
-            let _ = self.handle_events();
-            if self.send {
-                self.send = false;
-                let message: Message = match deserialise(format!("{hostname}|{}", self.user_input.iter().collect::<String>())).first() {
-                    Some(message) => message.clone(),
-                    None => return
-                };
-                let _ = client.send(&message);
-                self.user_input.clear();
-            }
+    pub fn run(&mut self, terminal: &mut DefaultTerminal, client: &mut Client, hostname: &String) -> Result<(), ()> {
+        match client.consume_inbox() {
+            Some(mut inbox) => self.messages.append(&mut inbox),
+            None => {}
         }
+        match terminal.draw(|frame| self.draw(frame)) {
+            Ok(_) => {},
+            Err(_) => return Err(())
+        };
+        let _ = self.handle_events();
+        if self.send {
+            self.send = false;
+            let message: Message = match deserialise(format!("{hostname}|{}", self.user_input.iter().collect::<String>())).first() {
+                Some(message) => message.clone(),
+                None => return Ok(())
+            };
+            let _ = client.send(&message);
+            self.user_input.clear();
+        }
+        Ok(())
     }
 
     fn draw(&self, frame: &mut Frame) {
