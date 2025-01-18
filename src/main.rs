@@ -18,6 +18,8 @@ fn main() {
         Some(hostname) => hostname,
         None => panic!("No localaddr could be found.")
     };
+    
+    println!("Using {hostname} IPV4 interface.");
 
     let terminal = ratatui::init();
     let application: Application = Application::new();
