@@ -198,6 +198,8 @@ pub fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: A
         }
 
         if message.chars().nth(0).unwrap() == '\0' {
+            let mut message_dump = message_dump.lock().unwrap();
+            message_dump.push(Message { author: String::from("SERVER"), content: format!("{client} disconnected.") });
             return;
         }
 
