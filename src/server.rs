@@ -156,17 +156,6 @@ impl Server {
             let _ = ma.set_nonblocking(true);
             let _ = ma.shutdown(std::net::Shutdown::Both);
         }
-        let tcp_listener = self.tcp_listener.lock().unwrap();
-        match &*tcp_listener {
-            Some(tcp) => {
-                let _ = tcp.set_nonblocking(true);
-                match self.listen_thread.take() {
-                    Some(handle) => { let _ = handle.join(); }
-                    None => {}
-                }
-            }
-            None => {}
-        }
     }
 
     pub fn clone_addr(&self) -> String {
