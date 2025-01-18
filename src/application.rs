@@ -10,8 +10,9 @@ use ratatui::{
 };
 use crate::server::{deserialise, Message};
 use crate::client::Client;
+use crate::utility::{sync, sync_vec, AM, AMV};
 use std::thread::{sleep, spawn};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Default)]
@@ -21,12 +22,6 @@ pub struct Application {
     pub exit: bool,
     send: bool
 }
-
-type AM<T> = Arc<Mutex<T>>;
-type AMV<T> = Arc<Mutex<Vec<T>>>;
-
-fn sync<T>(obj: T) -> AM<T> { Arc::new(Mutex::new(obj)) }
-fn sync_vec<T>(obj: Vec<T>) -> AMV<T> { Arc::new(Mutex::new(obj)) }
 
 fn render(area: Rect, buf: &mut Buffer, user_input: &Vec<char>, messages: &Vec<Message>) {
     let title = Line::from(" Rust Messaging App ").bold();
@@ -50,7 +45,7 @@ fn polling_message_renderer(
         exit: AM<bool>,
         send: AM<bool>,
         terminal: AM<DefaultTerminal>,
-        mut client: Client,
+        mut client: AM<Client>,
         hostname: String,
         messages: AMV<Message>,
         user_input: AMV<char>) {
@@ -71,14 +66,17 @@ fn polling_message_renderer(
             if *exit { break; }
         }
         let mut cont: bool = false;
-        match client.consume_inbox() {
-            Some(mut inbox) => {
-                let mut messages = messages.lock().unwrap();
-                messages.append(&mut inbox);
-            }
-            None => {
-                sleep(Duration::from_millis(500));
-                cont = true;
+        {
+            let mut client = client.lock().unwrap();
+            match client.consume_inbox() {
+                Some(mut inbox) => {
+                    let mut messages = messages.lock().unwrap();
+                    messages.append(&mut inbox);
+                }
+                None => {
+                    sleep(Duration::from_millis(500));
+                    cont = true;
+                }
             }
         }
         let mut user_input = user_input.lock().unwrap();
@@ -89,7 +87,10 @@ fn polling_message_renderer(
                 Some(message) => message.clone(),
                 None => return
             };
-            let _ = client.send(&message);
+            {
+                let mut client = client.lock().unwrap();
+                let _ = client.send(&message);
+            }
             cont = false;
             user_input.clear();
         }
@@ -164,7 +165,7 @@ impl Application {
     }
 }
 
-pub fn execute_application(application: Application, terminal: DefaultTerminal, client: Client, hostname: String) {
+pub fn execute_application(application: Application, terminal: DefaultTerminal, client: AM<Client>, hostname: String) {
     let user_input: AMV<char> = sync_vec(application.user_input);
     let terminal: AM<DefaultTerminal> = sync(terminal);
     let exit: AM<bool> = sync(application.exit);

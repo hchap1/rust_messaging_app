@@ -3,13 +3,8 @@ use std::io::{Read, Write};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
-use std::mem::replace;
-type AMV<T> = Arc<Mutex<Vec<T>>>;
-
-pub fn sync_vec<T>(item: Vec<T>) -> AMV<T> {
-    Arc::new(Mutex::new(item))
-}
+use std::sync::Arc;
+use crate::utility::{sync, sync_vec, AM, AMV};
 
 pub fn get_localaddr() -> Option<String> {
     let mut interfaces: Vec<String> = vec![];
@@ -31,7 +26,7 @@ pub fn get_localaddr() -> Option<String> {
     interfaces.first().cloned()
 }
 
-fn broadcast_server_address(server_address: String, frequency: f64) -> Result<String, String> {
+fn broadcast_server_address(running: AM<bool>, server_address: String, frequency: f64) -> Result<String, String> {
     println!("Attempting to create UDP Socket on address : {server_address}");
     let udp_socket = match UdpSocket::bind("0.0.0.0:12345") {
         Ok(udp_socket) => udp_socket,
@@ -52,6 +47,10 @@ fn broadcast_server_address(server_address: String, frequency: f64) -> Result<St
             Err(_) => return Err(format!("Failed to send address over UDP socket."))
         }
         sleep(sleep_duration);
+        let running = running.lock().unwrap();
+        if !*running {
+            return Ok(Default::default());
+        }
     }
 }
 
@@ -66,7 +65,9 @@ pub struct Server {
     outgoing_messages: AMV<Message>,
     message_agents: AMV<TcpStream>,
     listen_thread: Option<JoinHandle<()>>,
-    ip_address: String
+    ip_address: String,
+    running: AM<bool>,
+    tcp_listener: AM<Option<TcpListener>>
 }
 
 impl Message {
@@ -112,7 +113,9 @@ impl Server {
             outgoing_messages: sync_vec(vec![]),
             message_agents: sync_vec(vec![]),
             listen_thread: None,
-            ip_address: ip_address.clone()
+            ip_address: ip_address.clone(),
+            running: sync(true),
+            tcp_listener: sync(None)
         };
 
 
@@ -120,9 +123,11 @@ impl Server {
 
         let client_access_incoming_messages = Arc::clone(&server.incoming_messages);
         let client_access_message_agents = Arc::clone(&server.message_agents);
+        let listen_running = Arc::clone(&server.running);
+        let client_access_tcp_dump = Arc::clone(&server.tcp_listener);
 
         server.listen_thread = Some(spawn(move || {
-            listen(client_access_incoming_messages, client_access_message_agents, ip_address);
+            listen(client_access_incoming_messages, client_access_message_agents, ip_address, listen_running, client_access_tcp_dump);
         }));
 
         server
@@ -142,13 +147,34 @@ impl Server {
             let _ = stream.write_all(packet.as_bytes());
         }
     }
+    
+    pub fn kill(&mut self) {
+        let message_agents = self.message_agents.lock().unwrap();
+        let mut running = self.running.lock().unwrap();
+        *running = false;
+        for ma in message_agents.iter() {
+            let _ = ma.set_nonblocking(true);
+            let _ = ma.shutdown(std::net::Shutdown::Both);
+        }
+        let tcp_listener = self.tcp_listener.lock().unwrap();
+        match &*tcp_listener {
+            Some(tcp) => {
+                let _ = tcp.set_nonblocking(true);
+                match self.listen_thread.take() {
+                    Some(handle) => { let _ = handle.join(); }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+    }
 
     pub fn clone_addr(&self) -> String {
         self.ip_address.clone()
     }
 }
 
-fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, address: String) {
+fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, address: String, running: AM<bool>, tcp_listener_return: AM<Option<TcpListener>>) {
     let tcp_listener = match TcpListener::bind(&address) {
         Ok(tcp_listener) => tcp_listener,
         Err(e) => {
@@ -157,9 +183,14 @@ fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, addre
         }
     };
 
+    {
+        let mut tcp_listener_return = tcp_listener_return.lock().unwrap();
+        *tcp_listener_return = Some(tcp_listener.try_clone().unwrap());
+    }
+
     let server_address = tcp_listener.local_addr().unwrap().to_string();
     let mut thread_dump: Vec<JoinHandle<()>> = vec![];
-    spawn(move || broadcast_server_address(server_address, 1f64));
+    spawn(move || broadcast_server_address(running, server_address, 1f64));
 
     for stream in tcp_listener.incoming() {
         match stream {
@@ -181,6 +212,7 @@ fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, addre
                 let client_specific_message_dump: AMV<Message> = Arc::clone(&incoming_messages);
                 thread_dump.push(spawn(move || read_incoming_messages_from_client(stream, client_specific_message_dump, address)));
             }
+            // Shutdown occurs by setting set_nonblocking to true, causing this to error when there is no client joining.
             Err(_) => return
         }
     }

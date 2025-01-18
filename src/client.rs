@@ -3,9 +3,9 @@ use std::mem::replace;
 use std::io::{Read, Write};
 use std::time::Duration;
 use std::thread::{sleep, spawn, JoinHandle};
-use crate::server::{Server, Message, sync_vec, deserialise};
-use std::sync::{Arc, Mutex};
-type AMV<T> = Arc<Mutex<Vec<T>>>;
+use crate::server::{Server, Message, deserialise};
+use crate::utility::{sync_vec, AMV};
+use std::sync::Arc;
 
 fn receive(message_dump: AMV<Message>, mut read_stream: TcpStream) {
     loop {
@@ -14,11 +14,12 @@ fn receive(message_dump: AMV<Message>, mut read_stream: TcpStream) {
             Ok(size) => {
                 let message = String::from_utf8_lossy(&buffer[..size]).to_string();
                 if !message.is_empty() {
-                    // println!("RECEIVED: |{message}|");
                     let mut message_dump = message_dump.lock().unwrap();
                     let mut messages = deserialise(message);
-                    // println!("This corresponds to {} messages.", messages.len());
                     message_dump.append(&mut messages);
+                } else {
+                    eprintln!("Server closed. Connection terminated.");
+                    return;
                 }
             }
             Err(_) => {
@@ -51,7 +52,10 @@ impl Client {
         let mut server: Option<Server> = None;
 
         let server_address: String = match udp_socket.recv_from(&mut buffer) {
-            Ok((size, _)) => String::from_utf8_lossy(&buffer[..size]).to_string(),
+            Ok((size, _)) => {
+                std::mem::drop(udp_socket);
+                String::from_utf8_lossy(&buffer[..size]).to_string()
+            }
             Err(_) => {
                 std::mem::drop(udp_socket);
                 println!("No server exists - creating new.");
@@ -62,6 +66,7 @@ impl Client {
                 ip_address
             }
         };
+
 
         println!("Either received or timed out. {server_address}");
 
@@ -76,6 +81,14 @@ impl Client {
         client.listen_thread = Some(spawn(move || receive(listen_thread_owned_dump, read_stream)));
 
         Ok((client, server))
+    }
+
+    pub fn kill(&mut self) {
+        let _ = self.write_stream.set_nonblocking(true);
+        match self.listen_thread.take() {
+            Some(handle) => { let _ = handle.join(); }
+            None => {}
+        }
     }
 
     pub fn send(&mut self, message: &Message) -> Result<usize, String> {
