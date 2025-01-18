@@ -6,10 +6,13 @@ use ratatui::{
     symbols::border,
     text::{Line, Text},
     widgets::{Block, Paragraph, Widget},
-    DefaultTerminal, Frame,
+    DefaultTerminal
 };
 use crate::server::{deserialise, Message};
 use crate::client::Client;
+use std::thread::{sleep, spawn};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Default)]
 pub struct Application {
@@ -17,6 +20,134 @@ pub struct Application {
     user_input: Vec<char>,
     pub exit: bool,
     send: bool
+}
+
+type AM<T> = Arc<Mutex<T>>;
+type AMV<T> = Arc<Mutex<Vec<T>>>;
+
+fn sync<T>(obj: T) -> AM<T> { Arc::new(Mutex::new(obj)) }
+fn sync_vec<T>(obj: Vec<T>) -> AMV<T> { Arc::new(Mutex::new(obj)) }
+
+fn render(area: Rect, buf: &mut Buffer, user_input: &Vec<char>, messages: &Vec<Message>) {
+    let title = Line::from(" Rust Messaging App ").bold();
+    let input = Line::from(user_input.iter().collect::<String>()).bold();
+    let messages = Text::from(
+        messages.iter().map(|x| Line::from(vec![
+            x.author.to_string().magenta(),
+            " -> ".gray(),
+            x.content.to_string().white()
+        ])).collect::<Vec<Line>>()
+    );
+
+    let block = Block::bordered().title(title).title_bottom(input).border_set(border::THICK);
+    Paragraph::new(messages).centered().block(block).render(area, buf);
+}
+
+fn polling_message_renderer(
+        exit: AM<bool>,
+        send: AM<bool>,
+        terminal: AM<DefaultTerminal>,
+        mut client: Client,
+        hostname: String,
+        messages: AMV<Message>,
+        user_input: AMV<char>) {
+    {
+        let user_input = user_input.lock().unwrap();
+        {
+            let mut terminal = terminal.lock().unwrap();
+            let messages = messages.lock().unwrap();
+            match terminal.draw(|frame| render(frame.area(), frame.buffer_mut(), &user_input, &messages)) {
+                Ok(_) => {},
+                Err(_) => return
+            };
+        }
+    }
+    loop {
+        {
+            let exit = exit.lock().unwrap();
+            if *exit { break; }
+        }
+        let mut cont: bool = false;
+        match client.consume_inbox() {
+            Some(mut inbox) => {
+                let mut messages = messages.lock().unwrap();
+                messages.append(&mut inbox);
+            }
+            None => {
+                sleep(Duration::from_millis(500));
+                cont = true;
+            }
+        }
+        let mut user_input = user_input.lock().unwrap();
+        let mut send = send.lock().unwrap();
+        if *send {
+            *send = false;
+            let message: Message = match deserialise(format!("{hostname}|{}", user_input.iter().collect::<String>())).first() {
+                Some(message) => message.clone(),
+                None => return
+            };
+            let _ = client.send(&message);
+            cont = false;
+            user_input.clear();
+        }
+        if cont {
+            continue;
+        }
+        {
+            let mut terminal = terminal.lock().unwrap();
+            let messages = messages.lock().unwrap();
+            match terminal.draw(|frame| render(frame.area(), frame.buffer_mut(), &user_input, &messages)) {
+                Ok(_) => {},
+                Err(_) => return
+            };
+        }
+    }
+}
+
+fn blocking_event_loop(exit: AM<bool>, user_input: AMV<char>, send: AM<bool>, terminal: AM<DefaultTerminal>, messages: AMV<Message>) {
+    loop {
+        let e = match event::read() {
+            Ok(e) => e,
+            Err(_) => return
+        };
+        match e {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                let mut user_input = user_input.lock().unwrap();
+                let mut exit = exit.lock().unwrap();
+                let mut send = send.lock().unwrap();
+                handle_key_event(key_event, &mut exit, &mut user_input, &mut send);
+                if *exit { return; }
+            }
+            _ => { }
+        };
+        {
+            let mut terminal = terminal.lock().unwrap();
+            let messages = messages.lock().unwrap();
+            let user_input = user_input.lock().unwrap();
+            match terminal.draw(|frame| render(frame.area(), frame.buffer_mut(), &user_input, &messages)) {
+                Ok(_) => {},
+                Err(_) => return
+            };
+        }
+    }
+}
+
+fn handle_key_event(key_event: KeyEvent, exit: &mut bool, user_input: &mut Vec<char>, send: &mut bool) {
+    match key_event.code {
+        KeyCode::Esc => {
+            *exit = true;
+        }
+        KeyCode::Backspace => {
+            user_input.pop();
+        },
+        KeyCode::Char(c) => {
+            user_input.push(c);
+        }
+        KeyCode::Enter => {
+            *send = true;
+        },
+        _ => {}
+    };
 }
 
 impl Application {
@@ -28,80 +159,26 @@ impl Application {
             send: false
         }
     }
-
-    pub fn run(&mut self, terminal: &mut DefaultTerminal, client: &mut Client, hostname: &String) -> Result<(), ()> {
-        match client.consume_inbox() {
-            Some(mut inbox) => self.messages.append(&mut inbox),
-            None => {}
-        }
-        match terminal.draw(|frame| self.draw(frame)) {
-            Ok(_) => {},
-            Err(_) => return Err(())
-        };
-        let _ = self.handle_events();
-        if self.send {
-            self.send = false;
-            let message: Message = match deserialise(format!("{hostname}|{}", self.user_input.iter().collect::<String>())).first() {
-                Some(message) => message.clone(),
-                None => return Ok(())
-            };
-            let _ = client.send(&message);
-            self.user_input.clear();
-        }
-        Ok(())
-    }
-
-    fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
-    }
-
-    fn handle_events(&mut self) {
-        let e = match event::read() {
-            Ok(e) => e,
-            Err(_) => return
-        };
-        match e {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => { }
-        };
-    }
-
-    fn handle_key_event(&mut self, key_event: KeyEvent) {
-        match key_event.code {
-            KeyCode::Esc => self.exit = true,
-            KeyCode::Backspace => { self.user_input.pop(); },
-            KeyCode::Char(c) => self.user_input.push(c),
-            KeyCode::Enter => { self.send = true; },
-            _ => {}
-        };
-    }
 }
 
-impl Widget for &Application {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let title = Line::from(" Rust Messaging App ").bold();
-        let input = Line::from(self.user_input.iter().collect::<String>()).bold();
-        let messages = Text::from(
-            self.messages.iter().map(|x| Line::from(vec![
-                x.author.to_string().magenta(),
-                " -> ".gray(),
-                x.content.to_string().white()
-            ])).collect::<Vec<Line>>()
-        );
-
-        let block = Block::bordered().title(title).title_bottom(input).border_set(border::THICK);
-        Paragraph::new(messages).centered().block(block).render(area, buf);
-    }
-}
-
-pub fn execute_application(mut application: Application, terminal: &mut DefaultTerminal, client: &mut Client, hostname: &String) {
-    loop {
-        match application.run(terminal, client, hostname) {
-            Ok(_) => { if application.exit { break; }}
-            Err(_) => { break; }
-        }
-    }
+pub fn execute_application(application: Application, terminal: DefaultTerminal, client: Client, hostname: String) {
+    let user_input: AMV<char> = sync_vec(application.user_input);
+    let terminal: AM<DefaultTerminal> = sync(terminal);
+    let exit: AM<bool> = sync(application.exit);
+    let send: AM<bool> = sync(application.send);
+    let messages: AMV<Message> = sync_vec(application.messages);
+    let d_user_input = Arc::clone(&user_input);
+    let d_terminal = Arc::clone(&terminal);
+    let d_exit = Arc::clone(&exit);
+    let d_send = Arc::clone(&send);
+    let d_messages = Arc::clone(&messages);
+    let network_thread = spawn(move || {
+        polling_message_renderer(exit, send, terminal, client, hostname, messages, user_input);
+    });
+    let event_thread = spawn(move || {
+        blocking_event_loop(d_exit, d_user_input, d_send, d_terminal, d_messages);
+    });
+    let _ = network_thread.join();
+    let _ = event_thread.join();
     ratatui::restore();
 }

@@ -80,6 +80,8 @@ pub fn deserialise(serialised: String) -> Vec<Message> {
     let messages: Vec<String> = serialised.split('\n').map(|x| x.to_string()).collect::<Vec<String>>();
     let mut message_objects: Vec<Message> = vec![];
     for message in messages {
+        if message.is_empty() { continue; }
+        if !message.contains('|') { continue; }
         // Assume serialised protocol: NAME|CONTENT
         let components = message.split("|").map(|x| x.to_string()).collect::<Vec<String>>();
         message_objects.push(Message {
@@ -141,8 +143,9 @@ impl Server {
         for outgoing_message in outgoing_messages.iter() {
             packet += &outgoing_message.serialise();
         }
+        outgoing_messages.clear();
         for stream in streams.iter_mut() {
-            stream.write_all(packet.as_bytes());
+            let _ = stream.write_all(packet.as_bytes());
         }
     }
 

@@ -14,8 +14,11 @@ fn receive(message_dump: AMV<Message>, mut read_stream: TcpStream) {
             Ok(size) => {
                 let message = String::from_utf8_lossy(&buffer[..size]).to_string();
                 if !message.is_empty() {
+                    // println!("RECEIVED: |{message}|");
                     let mut message_dump = message_dump.lock().unwrap();
-                    message_dump.append(&mut deserialise(message));
+                    let mut messages = deserialise(message);
+                    // println!("This corresponds to {} messages.", messages.len());
+                    message_dump.append(&mut messages);
                 }
             }
             Err(_) => {

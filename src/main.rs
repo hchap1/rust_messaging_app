@@ -19,10 +19,10 @@ fn main() {
         None => panic!("No localaddr could be found.")
     };
 
-    let mut terminal = ratatui::init();
+    let terminal = ratatui::init();
     let application: Application = Application::new();
     let application_handle = spawn(move || {
-        let _ = execute_application(application, &mut terminal, &mut client, &hostname);
+        let _ = execute_application(application, terminal, client, hostname);
     });
 
     match server {
@@ -32,6 +32,6 @@ fn main() {
                 sleep(Duration::from_secs(1));
             }
         }
-        None => { application_handle.join(); }
+        None => { let _ = application_handle.join(); }
     }
 }
