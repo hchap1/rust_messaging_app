@@ -33,7 +33,10 @@ fn render(area: Rect, buf: &mut Buffer, user_input: &Vec<char>, messages: &Vec<M
     let input = Line::from(user_input.iter().collect::<String>()).bold();
     let messages = Text::from(
         messages.iter().map(|x| Line::from(vec![
-            x.author.to_string().magenta(),
+            match x.author == "SERVER" {
+                true => x.author.to_string().green(),
+                false => x.author.to_string().magenta()
+            },
             " -> ".gray(),
             x.content.to_string().white()
         ])).collect::<Vec<Line>>()

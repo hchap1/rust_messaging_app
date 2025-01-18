@@ -32,7 +32,7 @@ pub fn get_localaddr() -> Option<String> {
 }
 
 fn broadcast_server_address(server_address: String, frequency: f64) -> Result<String, String> {
-    println!("Attempting to create UDP Socket");
+    println!("Attempting to create UDP Socket on address : {server_address}");
     let udp_socket = match UdpSocket::bind("0.0.0.0:12345") {
         Ok(udp_socket) => udp_socket,
         Err(e) => {
@@ -128,12 +128,6 @@ impl Server {
         server
     }
 
-    pub fn get_messages(&self) -> Option<Vec<Message>> {
-        let mut messages = self.incoming_messages.lock().unwrap(); 
-        if messages.len() == 0 { return None; }
-        Some(replace(&mut messages, vec![]))
-    }
-
     pub fn distribute(&mut self) {
         let mut incoming_messages = self.incoming_messages.lock().unwrap();
         let mut outgoing_messages = self.outgoing_messages.lock().unwrap();
@@ -164,39 +158,46 @@ fn listen(incoming_messages: AMV<Message>, message_agents: AMV<TcpStream>, addre
     };
 
     let server_address = tcp_listener.local_addr().unwrap().to_string();
-
     let mut thread_dump: Vec<JoinHandle<()>> = vec![];
-
     spawn(move || broadcast_server_address(server_address, 1f64));
 
     for stream in tcp_listener.incoming() {
         match stream {
             Ok(stream) => {
                 let outgoing_stream: TcpStream = stream.try_clone().unwrap();
+                let address: String;
                 {
+                    address = match stream.peer_addr() {
+                        Ok(address) => address.ip().to_string(),
+                        Err(_) => String::from("<UNKNOWN CLIENT>")
+                    };
                     let mut message_agents = message_agents.lock().unwrap();
                     message_agents.push(outgoing_stream);
+                    let packet: String = format!("SERVER|{address} connected.");
+                    for ma in message_agents.iter_mut() {
+                        let _ = ma.write_all(packet.as_bytes());
+                    }
                 }
                 let client_specific_message_dump: AMV<Message> = Arc::clone(&incoming_messages);
-                thread_dump.push(spawn(move || read_incoming_messages_from_client(stream, client_specific_message_dump)));
+                thread_dump.push(spawn(move || read_incoming_messages_from_client(stream, client_specific_message_dump, address)));
             }
             Err(_) => return
         }
     }
 }
 
-pub fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: AMV<Message>) {
+pub fn read_incoming_messages_from_client(mut stream: TcpStream, message_dump: AMV<Message>, client: String) {
     loop {
         let mut buffer = [0; 512];
         let _ = stream.read(&mut buffer);
         let message: String = String::from_utf8_lossy(&buffer).to_string();
         if message.is_empty() {
-            eprintln!("Client disconnected unexpectedly.");
+            let mut message_dump = message_dump.lock().unwrap();
+            message_dump.push(Message { author: String::from("SERVER"), content: format!("{client} disconnected.") });
             return;
         }
 
         if message.chars().nth(0).unwrap() == '\0' {
-            eprintln!("Client disconnected unexpectedly.");
             return;
         }
 
