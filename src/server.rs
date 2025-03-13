@@ -1,29 +1,21 @@
 use std::net::{UdpSocket, TcpListener, TcpStream};
 use std::io::{Read, Write};
-use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
 use std::sync::Arc;
+use pnet::datalink::{self};
 use crate::utility::{sync, sync_vec, AM, AMV};
 
 pub fn get_localaddr() -> Option<String> {
-    let mut interfaces: Vec<String> = vec![];
-    let network_interfaces = NetworkInterface::show().unwrap();
-    for itf in network_interfaces.into_iter() {
-        let addr = itf.addr;
-        let data = match addr.first() {
-            Some(data) => data.ip(),
-            None => continue
-        };
-
-        if data.to_string() == "127.0.0.1" {
-            continue;
+    for interface in datalink::interfaces() {
+        if interface.is_up() && !interface.is_loopback() {
+            for ip in interface.ips {
+                if ip.ip().is_loopback() || !ip.ip().is_ipv4() { continue; }
+                return Some(ip.ip().to_string());
+            }
         }
-
-        interfaces.push(data.to_string());
     }
-
-    interfaces.first().cloned()
+    None
 }
 
 fn broadcast_server_address(running: AM<bool>, server_address: String, frequency: f64) -> Result<String, String> {

@@ -23,6 +23,7 @@ fn main() {
         Some(hostname) => hostname,
         None => panic!("No localaddr could be found.")
     };
+
     
     println!("Using {hostname} IPV4 interface.");
 
